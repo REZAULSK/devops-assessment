@@ -3,12 +3,22 @@
 __pycache__/
 .env
 .pytest_cache
+.ruff_cache
 cert
 logs
 note.txt
 .terraform
-.terraform.lock.hcl
+
+# .terraform.lock.hcl is deliberately NOT ignored. It pins the exact provider
+# versions and their checksums, so `terraform init` resolves identically for
+# everyone and in CI. Ignoring it is the infrastructure equivalent of ignoring
+# uv.lock — the next `init` can quietly pick up a new provider major.
+!.terraform.lock.hcl
+
 deployment_list.txt
+
+# Written by the deploy workflow when it reads the live task definition.
+task-definition.json
 .qodo
 .coverage
 htmlcov
