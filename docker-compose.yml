@@ -19,7 +19,12 @@ services:
             # Host port 5433 on purpose: 5432 is commonly already taken locally.
             - "5433:5432"
         volumes:
-            - pgdata:/var/lib/postgresql/data
+            # Postgres 18 images moved to major-version-specific data directories
+            # and refuse to start against a volume mounted at the old
+            # /var/lib/postgresql/data path. Mounting the parent is what the
+            # image expects, and it is what makes `pg_upgrade --link` possible
+            # later without crossing a mount boundary.
+            - pgdata:/var/lib/postgresql
         healthcheck:
             test: ["CMD-SHELL", "pg_isready -U hero -d heroes"]
             interval: 5s
@@ -27,7 +32,7 @@ services:
             retries: 10
 
     jaeger:
-        image: jaegertracing/all-in-one:1.65
+        image: jaegertracing/all-in-one:1.76.0
         environment:
             COLLECTOR_OTLP_ENABLED: "true"
         ports:
