@@ -1,0 +1,48 @@
+# Anything listed here is invisible to `docker build`.
+# Two reasons this matters: a smaller build context is faster, and secrets or
+# local state can never accidentally end up baked into a published image.
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+cert/
+
+# Version control and CI
+.git
+.github
+.gitignore
+.pre-commit-config.yaml
+
+# Local virtualenv — the image builds its own
+.venv
+
+# Python caches
+__pycache__/
+*.py[cod]
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Editor and tooling
+.vscode
+.qodo
+
+# Infrastructure — not needed to run the app
+terraform/
+.terraform
+.terraform.lock.hcl
+docs/
+
+# Local orchestration
+docker-compose.yml
+docker-compose.*.yml
+Dockerfile
+.dockerignore
+
+# Scratch
+note.txt
+logs/
+deployment_list.txt
