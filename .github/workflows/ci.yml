@@ -1,0 +1,160 @@
+name: CI
+
+# Runs on every push and every pull request. Deployment lives in deploy.yml and
+# depends on this workflow succeeding first, so nothing reaches AWS that has not
+# been linted, type-checked, tested, and proven to build as a container.
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+    workflow_dispatch:
+
+# A newer push to the same branch makes the in-flight run irrelevant.
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+jobs:
+    quality:
+        name: Lint, type-check, test
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  enable-cache: true
+                  cache-dependency-glob: uv.lock
+
+            - name: Install dependencies
+              # --frozen fails if uv.lock is out of date with pyproject.toml,
+              # which catches a dependency added without regenerating the lock.
+              run: uv sync --frozen --all-groups
+
+            - name: Lint
+              run: uv run ruff check --output-format=github .
+
+            - name: Check formatting
+              run: uv run ruff format --check .
+
+            - name: Type-check
+              run: uv run ty check
+
+            - name: Test
+              run: uv run pytest --cov=src --cov-report=term-missing
+
+    terraform:
+        name: Terraform validate
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v5
+
+            - uses: hashicorp/setup-terraform@v3
+              with:
+                  terraform_version: "1.15.8"
+
+            - name: Check formatting
+              run: terraform fmt -check -recursive
+              working-directory: terraform
+
+            # -backend=false: validation needs the providers, not the state, and
+            # this job holds no AWS credentials by design.
+            - name: Initialise
+              run: terraform init -backend=false -input=false
+              working-directory: terraform
+
+            - name: Validate
+              run: terraform validate -no-color
+              working-directory: terraform
+
+    image:
+        name: Container image builds and runs
+        runs-on: ubuntu-latest
+
+        # A real database, so the check below exercises the same startup path
+        # that runs on Fargate — including schema creation — instead of a
+        # stubbed-out approximation of it.
+        services:
+            postgres:
+                image: postgres:18-alpine
+                env:
+                    POSTGRES_USER: hero
+                    POSTGRES_PASSWORD: hero_ci_only
+                    POSTGRES_DB: heroes
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd "pg_isready -U hero -d heroes"
+                    --health-interval 5s
+                    --health-timeout 3s
+                    --health-retries 10
+
+        steps:
+            - uses: actions/checkout@v5
+
+            - uses: docker/setup-buildx-action@v3
+
+            # Build only. Publishing is deploy.yml's job, and a pull request from
+            # a fork must never be able to push an image.
+            - name: Build
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  push: false
+                  load: true
+                  tags: devops-assessment:ci
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+
+            # A build that succeeds can still produce an image that dies on
+            # start — a bad CMD, a missing module, an unreadable file after the
+            # switch to a non-root user, a schema step that never completes.
+            # This catches all of those here rather than in a rolling deploy.
+            - name: Container starts, connects, and serves traffic
+              run: |
+                  docker run -d --name ci-check --network host \
+                    -e DATABASE_URL="postgresql+psycopg://hero:hero_ci_only@127.0.0.1:5432/heroes" \
+                    -e OTEL_SDK_DISABLED=true \
+                    -e LOG_LEVEL=INFO \
+                    devops-assessment:ci
+
+                  ready=false
+                  for _ in $(seq 1 30); do
+                    if curl -fsS http://127.0.0.1:8000/health > /dev/null; then
+                      ready=true
+                      break
+                    fi
+                    sleep 2
+                  done
+
+                  if [ "$ready" != "true" ]; then
+                    echo "::error::container never served /health"
+                    docker logs ci-check
+                    exit 1
+                  fi
+
+                  echo "--- /ready (schema created, database reachable) ---"
+                  curl -fsS http://127.0.0.1:8000/ready
+
+                  echo "--- write then read back through the database ---"
+                  created=$(curl -fsS -X POST http://127.0.0.1:8000/heroes/ \
+                    -H 'content-type: application/json' \
+                    -d '{"name":"Deploy Test","age":1,"secret_name":"ci"}')
+                  echo "$created"
+
+                  hero_id=$(echo "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+                  curl -fsS "http://127.0.0.1:8000/heroes/$hero_id" | grep -q 'Deploy Test'
+
+                  echo "--- application logs (structured JSON) ---"
+                  docker logs ci-check | tail -20
+
+            - name: Show container logs on failure
+              if: failure()
+              run: docker logs ci-check || true
