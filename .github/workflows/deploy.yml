@@ -1,0 +1,138 @@
+name: Deploy
+
+# Every push to main that passes CI is built and rolled out to Fargate.
+#
+# The pipeline does not run `terraform apply`. Terraform owns the shape of the
+# infrastructure and is applied deliberately; the pipeline owns which image
+# version the service runs. Keeping those separate means a routine code deploy
+# can never silently replace a database or tear down a load balancer because
+# somebody edited a variable.
+
+on:
+    workflow_run:
+        workflows: [CI]
+        types: [completed]
+        branches: [main]
+    workflow_dispatch:
+
+# Deploys must not overlap: two concurrent `update-service` calls leave the
+# service running whichever revision happened to land last, not the newest.
+concurrency:
+    group: deploy-production
+    cancel-in-progress: false
+
+permissions:
+    contents: read
+    id-token: write # Required to request the OIDC token. Nothing else needs it.
+
+env:
+    AWS_REGION: us-east-1
+    ECR_REPOSITORY: hero-api-assessment
+    ECS_CLUSTER: hero-api-assessment
+    ECS_SERVICE: hero-api-assessment
+    TASK_FAMILY: hero-api-assessment
+    CONTAINER_NAME: api
+
+jobs:
+    deploy:
+        name: Build and roll out
+        runs-on: ubuntu-latest
+
+        # workflow_run fires whatever the outcome, so the result has to be
+        # checked explicitly or a red CI run would still deploy.
+        if: >-
+            github.event_name == 'workflow_dispatch' ||
+            github.event.workflow_run.conclusion == 'success'
+
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  # workflow_run checks out the default branch by default; pin to
+                  # the commit CI actually validated.
+                  ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+            - name: Resolve commit SHA
+              id: commit
+              run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+            # No stored access keys. GitHub proves which repository and branch is
+            # running; AWS returns credentials that expire with the job.
+            - name: Assume deployment role
+              uses: aws-actions/configure-aws-credentials@v5
+              with:
+                  role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+                  aws-region: ${{ env.AWS_REGION }}
+                  role-session-name: gha-${{ github.run_id }}
+
+            - name: Log in to ECR
+              id: ecr
+              uses: aws-actions/amazon-ecr-login@v2
+
+            - uses: docker/setup-buildx-action@v3
+
+            # Tagged with the commit SHA, never `latest`. The tag is the only
+            # record of what is running, so it has to identify exactly one
+            # commit — otherwise "roll back to the previous image" is guesswork.
+            - name: Build and push
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  push: true
+                  tags: |
+                      ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.commit.outputs.sha }}
+                      ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:main
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+                  provenance: false
+
+            # Take the live task definition and swap only the image. Rewriting it
+            # from scratch here would duplicate what Terraform already declares,
+            # and the two copies would drift.
+            - name: Render task definition
+              id: render
+              run: |
+                  aws ecs describe-task-definition \
+                    --task-definition "$TASK_FAMILY" \
+                    --query taskDefinition > task-definition.json
+
+            - name: Set new image
+              id: task-def
+              uses: aws-actions/amazon-ecs-render-task-definition@v1
+              with:
+                  task-definition: task-definition.json
+                  container-name: ${{ env.CONTAINER_NAME }}
+                  image: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.commit.outputs.sha }}
+
+            # wait-for-service-stability is what turns this from "the API call
+            # succeeded" into "the new version is actually serving traffic". With
+            # the service's circuit breaker enabled, a failing rollout is rolled
+            # back by ECS and this step reports the failure.
+            - name: Deploy
+              uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+              with:
+                  task-definition: ${{ steps.task-def.outputs.task-definition }}
+                  service: ${{ env.ECS_SERVICE }}
+                  cluster: ${{ env.ECS_CLUSTER }}
+                  wait-for-service-stability: true
+
+            # Independent confirmation from outside AWS's own health machinery:
+            # the public endpoint answers, and it answers from the new revision.
+            - name: Smoke test the public endpoint
+              run: |
+                  url=$(aws elbv2 describe-load-balancers \
+                    --names "$ECS_CLUSTER" \
+                    --query 'LoadBalancers[0].DNSName' --output text)
+
+                  echo "checking http://$url/health"
+
+                  for _ in $(seq 1 20); do
+                    if curl -fsS "http://$url/health" > /dev/null; then
+                      echo "deployment verified: $(curl -fsS "http://$url/ready")"
+                      echo "### Deployed \`${{ steps.commit.outputs.sha }}\` to http://$url" >> "$GITHUB_STEP_SUMMARY"
+                      exit 0
+                    fi
+                    sleep 5
+                  done
+
+                  echo "::error::endpoint did not respond after deployment"
+                  exit 1
