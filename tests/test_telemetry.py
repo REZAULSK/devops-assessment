@@ -86,3 +86,18 @@ def test_health_checks_are_not_traced(
     client.get("/health")
 
     assert spans.get_finished_spans() == ()
+
+
+def test_readiness_probe_emits_no_orphan_database_spans(
+    client: TestClient, spans: InMemorySpanExporter
+) -> None:
+    """Excluding the route is not enough on its own.
+
+    `excluded_urls` suppresses the HTTP server span, but the SQLAlchemy span
+    nested inside it survives — and with no parent it becomes a root trace.
+    Probing would then produce a stream of one-span traces in X-Ray. This
+    asserts the suppression that prevents it.
+    """
+    client.get("/ready")
+
+    assert spans.get_finished_spans() == ()
