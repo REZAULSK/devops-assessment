@@ -5,12 +5,19 @@
 #
 # Resolves and installs dependencies into a self-contained virtualenv.
 # uv is only needed here; it never reaches the runtime image.
+#
+# uv is installed from PyPI rather than pulled as ghcr.io/astral-sh/uv, so both
+# stages come from the same registry as everything else in this project. One
+# fewer registry in the build path is one fewer thing that can be unreachable
+# when a deploy is needed, and the version is pinned either way.
 # ---------------------------------------------------------------------------
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS builder
+FROM python:3.13-slim-bookworm AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
+
+RUN pip install --no-cache-dir uv==0.11.13
 
 WORKDIR /app
 
