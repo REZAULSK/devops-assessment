@@ -1,0 +1,66 @@
+# Local development stack.
+#
+# This is not the deployment mechanism — AWS is described in terraform/.
+# Its job is to let the whole application be exercised on a laptop with the
+# same container image and the same collector binary that Fargate will run, so
+# problems surface here rather than in a deploy pipeline.
+#
+#   http://localhost:8000/docs    API
+#   http://localhost:16686        Jaeger — trace waterfalls
+
+services:
+    db:
+        image: postgres:18-alpine
+        environment:
+            POSTGRES_USER: hero
+            POSTGRES_PASSWORD: hero_local_only
+            POSTGRES_DB: heroes
+        ports:
+            # Host port 5433 on purpose: 5432 is commonly already taken locally.
+            - "5433:5432"
+        volumes:
+            - pgdata:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U hero -d heroes"]
+            interval: 5s
+            timeout: 3s
+            retries: 10
+
+    jaeger:
+        image: jaegertracing/all-in-one:1.65
+        environment:
+            COLLECTOR_OTLP_ENABLED: "true"
+        ports:
+            - "16686:16686" # web UI
+
+    otel-collector:
+        image: public.ecr.aws/aws-observability/aws-otel-collector:latest
+        command: ["--config=/etc/otel/config.yaml"]
+        volumes:
+            - ./observability/collector-local.yaml:/etc/otel/config.yaml:ro
+        depends_on:
+            - jaeger
+
+    api:
+        build:
+            context: .
+        environment:
+            DATABASE_URL: postgresql+psycopg://hero:hero_local_only@db:5432/heroes
+            DEBUG: "false"
+            LOG_LEVEL: INFO
+            ENVIRONMENT: local
+            OTEL_SERVICE_NAME: devops-assessment-api
+            OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+        ports:
+            - "8000:8000"
+        depends_on:
+            db:
+                # Wait for Postgres to actually accept connections, not merely to
+                # have started. The app creates its tables during startup, so it
+                # cannot tolerate a database that is still booting.
+                condition: service_healthy
+            otel-collector:
+                condition: service_started
+
+volumes:
+    pgdata:

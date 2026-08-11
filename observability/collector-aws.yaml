@@ -1,0 +1,47 @@
+# ADOT Collector configuration for the Fargate sidecar.
+#
+# Delivered to the container through the AOT_CONFIG_CONTENT environment
+# variable, which Terraform populates from this file. Keeping it as a real file
+# rather than an inline heredoc means it is reviewable, diffable, and can be
+# validated by the collector's own `validate` subcommand.
+
+receivers:
+    otlp:
+        protocols:
+            grpc:
+                # Loopback only. The collector shares a network namespace with
+                # the application container inside the task, so nothing outside
+                # the task can reach this port.
+                endpoint: 127.0.0.1:4317
+
+processors:
+    batch/traces:
+        timeout: 1s
+        send_batch_size: 50
+
+    # Drops spans the moment memory pressure appears, rather than letting the
+    # collector be OOM-killed and take the whole task down with it.
+    memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 15
+
+exporters:
+    awsxray:
+        region: ${env:AWS_REGION}
+        # Attributes listed here become searchable filters in the X-Ray console.
+        # Anything not indexed is still stored, just not filterable.
+        indexed_attributes:
+            - http.route
+            - http.status_code
+            - deployment.environment
+
+service:
+    pipelines:
+        traces:
+            receivers: [otlp]
+            processors: [memory_limiter, batch/traces]
+            exporters: [awsxray]
+    telemetry:
+        logs:
+            level: info
