@@ -45,7 +45,7 @@ jobs:
             github.event.workflow_run.conclusion == 'success'
 
         steps:
-            - uses: actions/checkout@v5
+            - uses: actions/checkout@v4
               with:
                   # workflow_run checks out the default branch by default; pin to
                   # the commit CI actually validated.
@@ -58,7 +58,7 @@ jobs:
             # No stored access keys. GitHub proves which repository and branch is
             # running; AWS returns credentials that expire with the job.
             - name: Assume deployment role
-              uses: aws-actions/configure-aws-credentials@v5
+              uses: aws-actions/configure-aws-credentials@v4
               with:
                   role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
                   aws-region: ${{ env.AWS_REGION }}

@@ -101,9 +101,9 @@ variable "log_retention_days" {
 }
 
 variable "github_repository" {
-  description = "owner/repo allowed to assume the deployment role via OIDC."
+  description = "GitHub repository formatted as owner/repo for OIDC trust"
   type        = string
-  default     = "goldkinen/devops-assessment"
+  default     = "REZAULSK/devops-assessment"
 }
 
 variable "enable_github_oidc" {
