@@ -79,6 +79,8 @@ jobs:
                   tags: |
                       ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.commit.outputs.sha }}
                       ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:main
+                      ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:bootstrap
+                      ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
                   provenance: false
