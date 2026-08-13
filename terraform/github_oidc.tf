@@ -52,9 +52,12 @@ data "aws_iam_policy_document" "github_assume_role" {
     # pull request from a fork — which runs with the same OIDC issuer — cannot
     # assume this role.
     condition {
-      test     = "StringEquals"
+      test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+      values   = [
+        "repo:${var.github_repository}:ref:refs/heads/main",
+        "repo:${lower(var.github_repository)}:ref:refs/heads/main"
+      ]
     }
   }
 }
