@@ -52,14 +52,21 @@ data "aws_iam_policy_document" "github_assume_role" {
     }
 
     # The important line. Restricted to the main branch of one repository, so a
-    # pull request from a fork — which runs with the same OIDC issuer — cannot
+    # pull request from a fork �?" which runs with the same OIDC issuer �?" cannot
     # assume this role.
+    #
+    # GitHub's OIDC subject has two shapes. Historically it was
+    # `repo:OWNER/REPO:ref:...`; GitHub now includes the owner and repository
+    # ids, e.g. `repo:OWNER@123/REPO@456:ref:...`. Both are trusted so the same
+    # policy survives GitHub's rollout without a redeploy.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
         "repo:${var.github_repository}:*",
-        "repo:${lower(var.github_repository)}:*"
+        "repo:${lower(var.github_repository)}:*",
+        "repo:${split("/", var.github_repository)[0]}@*/${split("/", var.github_repository)[1]}@*:*",
+        "repo:${lower(split("/", var.github_repository)[0])}@*/${lower(split("/", var.github_repository)[1])}@*:*",
       ]
     }
   }
