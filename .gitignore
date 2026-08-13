@@ -19,6 +19,8 @@ deployment_list.txt
 
 # Written by the deploy workflow when it reads the live task definition.
 task-definition.json
+*.tfstate
+*.tfstate.*
 .qodo
 .coverage
 htmlcov
