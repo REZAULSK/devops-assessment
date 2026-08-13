@@ -18,7 +18,10 @@ resource "aws_iam_openid_connect_provider" "github" {
 
   # GitHub's OIDC endpoint now uses a well-known CA, and AWS verifies the chain
   # itself, but the API still requires a thumbprint to be present.
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+  thumbprint_list = [
+    "6938fd4d98bab03faadb97b34396831e3780aea1",
+    "1c3d5f5d0c38228274129d040228d7611f64f9a5"
+  ]
 }
 
 data "aws_iam_openid_connect_provider" "github_existing" {

@@ -9,9 +9,7 @@ name: Deploy
 # somebody edited a variable.
 
 on:
-    workflow_run:
-        workflows: [CI]
-        types: [completed]
+    push:
         branches: [main]
     workflow_dispatch:
 
