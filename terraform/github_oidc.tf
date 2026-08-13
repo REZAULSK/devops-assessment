@@ -123,6 +123,13 @@ data "aws_iam_policy_document" "github_deploy" {
       values   = ["ecs-tasks.amazonaws.com"]
     }
   }
+
+  # The pipeline's final smoke test resolves the load balancer DNS name.
+  statement {
+    sid       = "VerifyEndpoint"
+    actions   = ["elasticloadbalancing:DescribeLoadBalancers"]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "github_deploy" {

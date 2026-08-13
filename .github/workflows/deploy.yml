@@ -36,11 +36,10 @@ jobs:
         name: Build and roll out
         runs-on: ubuntu-latest
 
-        # workflow_run fires whatever the outcome, so the result has to be
-        # checked explicitly or a red CI run would still deploy.
-        if: >-
-            github.event_name == 'workflow_dispatch' ||
-            github.event.workflow_run.conclusion == 'success'
+        # Triggered by a push to main (on: push above), so no extra outcome
+        # check is needed — the old workflow_run condition referenced an event
+        # field that is null on push, which silently skipped this job.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
         steps:
             - uses: actions/checkout@v4
