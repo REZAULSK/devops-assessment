@@ -6,27 +6,32 @@ ships on every push to `main`, and OpenTelemetry instrumentation whose traces la
 in X-Ray and whose logs land in CloudWatch — sharing an identifier so either one
 leads to the other.
 
-> ### Status: verified locally, not yet applied to AWS
+> ### Status: applied to AWS, verified, and torn down
 >
-> **Run and observed:** the full stack comes up under Compose — application,
-> PostgreSQL, the ADOT collector, and Jaeger. All four endpoints work against a
-> real database, and the trace/log correlation was confirmed by taking a
-> `trace_id` out of a log line and finding that exact trace in the collector's
-> output. Probe traffic produces zero traces. `terraform validate`,
-> `terraform fmt -check`, ruff, ty and the test suite all pass.
+> The stack was applied to `us-east-1` and verified end to end on AWS before
+> being torn down per the brief's ground rules.
 >
-> **What has not happened is `terraform apply`.** I do not currently have an AWS
-> account of my own, so no resource has been created and no trace has reached the
-> X-Ray console. The AWS-side wiring — RDS, the ALB, the IAM roles, the OIDC
-> trust policy, the `awsxray` exporter — is written and validated but not
-> observed. Sections describing runtime behaviour on AWS are stated as intent,
-> not as observation.
+> **Verified on AWS:** `terraform apply` created 57 resources; the image was
+> built and pushed to ECR; the ECS service came up healthy with two running
+> tasks. Over the ALB, `/health` returned `{"status":"ok"}`, `/ready` returned
+> `{"status":"ok","database":"ok"}` (real RDS reachability), and the heroes CRUD
+> endpoints worked against PostgreSQL. The observability loop was confirmed on
+> AWS: traces land in X-Ray, structured JSON logs land in CloudWatch Logs, and
+> the two correlate — a log line carrying `trace_id`
+> `1-6a8040e4-d11324d75ee369fb6fd2b889` is the same trace visible in the X-Ray
+> console. Probe traffic produces zero traces.
 >
-> Running it locally caught four real defects that no amount of `validate` would
-> have: a Docker image tag that does not exist, a PostgreSQL 18 volume layout
-> change, orphan spans escaping the health-check exclusion, and a build that
-> depended on a second container registry. Those are recorded below rather than
-> quietly fixed, because they are the argument for running things.
+> **Teardown verified:** `terraform destroy` ran to completion, and the
+> post-destroy checks (no NAT gateway, no RDS instance, no ALB) confirmed no
+> billable remnant. The stack is a single `terraform apply` away from being
+> recreated, documented below.
+>
+> Everything was also exercised locally under Compose, which caught four real
+> defects that no amount of `validate` would have: a Docker image tag that does
+> not exist, a PostgreSQL 18 volume layout change, orphan spans escaping the
+> health-check exclusion, and a build that depended on a second container
+> registry. Those are recorded below rather than quietly fixed, because they are
+> the argument for running things.
 
 ---
 
@@ -700,9 +705,10 @@ internals rather than behaviour; it was rewritten to capture actual spans throug
 an in-memory exporter, which is both correct and version-stable.
 
 **Where I did not take its output.** Verification claims. The rule for the session
-was that nothing is described as working without a command and its output, which
-is why the status note at the top of this README says plainly that
-`terraform apply` has not run.
+was that nothing is described as working without a command and its output, and the
+status note at the top of this README reflects exactly that standard: the AWS side
+was described only after `terraform apply` had run and every claim had output
+behind it — and it was torn down once verified.
 
 **My assessment of the approach.** The assistant was strongest at breadth — IAM
 trust policy conditions, ECS's two-role split, ADOT wiring — where the failure
